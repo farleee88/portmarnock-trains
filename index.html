@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portmarnock Departures</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0d12;
+    --panel: #0f1318;
+    --border: #1e2530;
+    --amber: #f5a623;
+    --green: #2ecc71;
+    --red: #e74c3c;
+    --orange: #f39c12;
+    --text: #e8dcc8;
+    --dim: #6b7280;
+    --blue: #1a6eb5;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Barlow Condensed', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    padding: 16px 16px 12px;
+  }
+
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.025) 2px, rgba(0,0,0,0.025) 4px);
+    pointer-events: none;
+    z-index: 100;
+  }
+
+  header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 12px;
+  }
+
+  .station-name {
+    font-size: clamp(1.6rem, 5vw, 2.2rem);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--amber);
+    text-shadow: 0 0 20px rgba(245,166,35,0.35);
+    line-height: 1;
+  }
+
+  .station-sub {
+    font-size: 0.75rem;
+    color: var(--dim);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-top: 4px;
+    font-weight: 300;
+  }
+
+  .header-right { text-align: right; }
+
+  .clock {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: clamp(1.8rem, 6vw, 2.4rem);
+    color: var(--amber);
+    text-shadow: 0 0 15px rgba(245,166,35,0.4);
+    letter-spacing: 0.04em;
+    line-height: 1;
+  }
+
+  .date-line {
+    font-size: 0.72rem;
+    color: var(--dim);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-top: 4px;
+  }
+
+  .col-headers {
+    display: grid;
+    grid-template-columns: 80px 1fr 80px 70px;
+    gap: 0 10px;
+    padding: 0 14px 7px;
+    font-size: 0.65rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--dim);
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 8px;
+  }
+
+  .trains {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .train-row {
+    display: grid;
+    grid-template-columns: 80px 1fr 80px 70px;
+    gap: 0 10px;
+    align-items: center;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 13px 14px;
+    position: relative;
+    overflow: hidden;
+    animation: rowIn 0.35s ease both;
+  }
+
+  .train-row:nth-child(1) { animation-delay: 0.04s; }
+  .train-row:nth-child(2) { animation-delay: 0.08s; }
+  .train-row:nth-child(3) { animation-delay: 0.12s; }
+  .train-row:nth-child(4) { animation-delay: 0.16s; }
+  .train-row:nth-child(5) { animation-delay: 0.20s; }
+
+  @keyframes rowIn {
+    from { opacity: 0; transform: translateX(-6px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+
+  .train-row::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 4px;
+    border-radius: 6px 0 0 6px;
+    background: var(--blue);
+  }
+  .train-row.on-time::before   { background: var(--green); }
+  .train-row.delayed::before   { background: var(--orange); }
+  .train-row.cancelled::before { background: var(--red); }
+
+  .col-time {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 1.55rem;
+    color: var(--amber);
+    letter-spacing: 0.02em;
+    line-height: 1;
+  }
+
+  .col-dest { min-width: 0; }
+
+  .dest-name {
+    font-size: 1.4rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1;
+  }
+
+  .dest-train {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--dim);
+    letter-spacing: 0.08em;
+    margin-top: 3px;
+  }
+
+  .col-status {
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    text-align: center;
+  }
+  .status-ontime   { color: var(--green); }
+  .status-delayed  { color: var(--orange); }
+  .status-cancelled { color: var(--red); }
+
+  .col-countdown { text-align: right; }
+
+  .due-num {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 1.45rem;
+    line-height: 1;
+    font-weight: 700;
+  }
+  .due-label {
+    font-size: 0.6rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-top: 2px;
+  }
+
+  .urgent      { color: var(--red);    text-shadow: 0 0 8px rgba(231,76,60,0.5); }
+  .soon        { color: var(--orange); }
+  .comfortable { color: var(--green); }
+
+  footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    margin-top: 10px;
+  }
+
+  .footer-brand {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 0.68rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  .ir-dot { width: 7px; height: 7px; background: var(--blue); border-radius: 50%; }
+
+  .refresh-info {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--dim);
+  }
+
+  .pulse {
+    display: inline-block;
+    width: 6px; height: 6px;
+    background: var(--green);
+    border-radius: 50%;
+    margin-right: 5px;
+    vertical-align: middle;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  .loading {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: var(--dim);
+    font-size: 0.9rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+  }
+
+  .error-msg {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: var(--red);
+    font-size: 0.9rem;
+    letter-spacing: 0.1em;
+  }
+
+  .loading-bar { width: 140px; height: 2px; background: var(--border); border-radius: 2px; overflow: hidden; }
+  .loading-bar::after {
+    content: '';
+    display: block;
+    height: 100%;
+    width: 40%;
+    background: var(--amber);
+    border-radius: 2px;
+    animation: loadSlide 1.2s ease-in-out infinite;
+  }
+  @keyframes loadSlide { 0%{transform:translateX(-150%)} 100%{transform:translateX(400%)} }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="station-name">Portmarnock</div>
+    <div class="station-sub">Live Departures · DART / Northern Line</div>
+  </div>
+  <div class="header-right">
+    <div class="clock" id="clock">--:--:--</div>
+    <div class="date-line" id="dateline">---</div>
+  </div>
+</header>
+
+<div class="col-headers">
+  <span>Departs</span>
+  <span>Destination</span>
+  <span style="text-align:center">Status</span>
+  <span style="text-align:right">Leaves in</span>
+</div>
+
+<div class="trains" id="trains">
+  <div class="loading">
+    <div>Fetching departures</div>
+    <div class="loading-bar"></div>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-brand">
+    <div class="ir-dot"></div>
+    Iarnród Éireann · Real-time
+  </div>
+  <div class="refresh-info">
+    <span class="pulse"></span>
+    <span id="last-updated">Connecting…</span>
+  </div>
+</footer>
+
+<script>
+const API = 'http://api.irishrail.ie/realtime/realtime.asmx/getStationDataByNameXML?StationDesc=Portmarnock';
+const PROXIES = [
+  u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+  u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+  u => `https://thingproxy.freeboard.io/fetch/${u}`,
+];
+
+function tick() {
+  const n = new Date();
+  document.getElementById('clock').textContent = n.toLocaleTimeString('en-IE', { hour12: false });
+  document.getElementById('dateline').textContent = n.toLocaleDateString('en-IE', { weekday: 'long', day: 'numeric', month: 'long' });
+}
+setInterval(tick, 1000);
+tick();
+
+async function fetchData() {
+  for (const make of PROXIES) {
+    try {
+      const r = await fetch(make(API), { signal: AbortSignal.timeout(7000) });
+      if (!r.ok) continue;
+      const t = await r.text();
+      if (t.includes('ArrayOf') || t.includes('objStationData')) return t;
+    } catch {}
+  }
+  throw new Error('All proxies failed');
+}
+
+// Convert "HH:MM" string to today's Date object
+function timeToDate(hhmm) {
+  const [h, m] = hhmm.split(':').map(Number);
+  const d = new Date();
+  d.setHours(h, m, 0, 0);
+  return d;
+}
+
+function parse(xml) {
+  const doc = new DOMParser().parseFromString(xml, 'text/xml');
+  const now = new Date();
+  const rows = [];
+
+  doc.querySelectorAll('objStationData').forEach(n => {
+    const g    = tag => n.querySelector(tag)?.textContent?.trim() ?? '';
+    const due  = parseInt(g('Duein') || '999', 10);
+    const late = parseInt(g('Late')  || '0',   10);
+    const schTime = g('Schdepart');
+
+    // Work out actual expected departure = scheduled + delay
+    let expectedDepart = null;
+    if (schTime && schTime.includes(':')) {
+      expectedDepart = timeToDate(schTime);
+      expectedDepart.setMinutes(expectedDepart.getMinutes() + late);
+    }
+
+    // Hide if expected departure was more than 2 minutes ago
+    if (expectedDepart && (now - expectedDepart) > 2 * 60 * 1000) return;
+
+    // Hide if due-in is nonsensical
+    if (due < 0 || due > 120) return;
+
+    rows.push({
+      time: schTime,
+      dest: g('Destination'),
+      code: g('Traincode'),
+      late,
+      status: g('Status'),
+      due,
+    });
+  });
+
+  return rows.sort((a, b) => a.due - b.due).slice(0, 5);
+}
+
+function render(trains) {
+  const el = document.getElementById('trains');
+  if (!trains.length) {
+    el.innerHTML = `<div class="error-msg">No upcoming departures in next 2 hours</div>`;
+    return;
+  }
+  el.innerHTML = trains.map(t => {
+    const cancelled = t.status === 'Cancelled';
+    const delayed   = !cancelled && t.late > 2;
+    const rowCls    = cancelled ? 'cancelled' : delayed ? 'delayed' : 'on-time';
+    const stCls     = cancelled ? 'status-cancelled' : delayed ? 'status-delayed' : 'status-ontime';
+    const stTxt     = cancelled ? 'Cancelled' : delayed ? `+${t.late} min` : 'On Time';
+    const dueCls    = t.due <= 3 ? 'urgent' : t.due <= 8 ? 'soon' : 'comfortable';
+    const dueNum    = t.due === 0 ? 'NOW' : `${t.due}`;
+    const dueUnit   = t.due === 0 ? '' : t.due === 1 ? 'min' : 'mins';
+
+    return `
+      <div class="train-row ${rowCls}">
+        <div class="col-time">${t.time}</div>
+        <div class="col-dest">
+          <div class="dest-name">${t.dest || '—'}</div>
+          <div class="dest-train">${t.code}</div>
+        </div>
+        <div class="col-status ${stCls}">${stTxt}</div>
+        <div class="col-countdown">
+          <div class="due-num ${dueCls}">${dueNum}</div>
+          <div class="due-label">${dueUnit}</div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function refresh() {
+  try {
+    const xml    = await fetchData();
+    const trains = parse(xml);
+    render(trains);
+    document.getElementById('last-updated').textContent =
+      `Updated ${new Date().toLocaleTimeString('en-IE', { hour12: false })}`;
+  } catch {
+    if (document.querySelector('.loading')) {
+      document.getElementById('trains').innerHTML =
+        `<div class="error-msg">⚠ Could not reach Irish Rail</div>`;
+    }
+    document.getElementById('last-updated').textContent = 'Retrying…';
+  }
+}
+
+refresh();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>
