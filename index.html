@@ -429,13 +429,16 @@ function render(trains) {
     const dueCls    = t.due <= 3 ? 'urgent' : t.due <= 8 ? 'soon' : 'comfortable';
     const dueNum    = t.due === 0 ? 'NOW' : `${t.due}`;
     const dueUnit   = t.due === 0 ? '' : t.due === 1 ? 'min' : 'mins';
+    const dirCls    = t.north ? 'northbound' : '';
+    const dirTag    = t.north ? `<span class="dir-tag">↑ North</span>` : '';
 
     return `
-      <div class="train-row ${rowCls}">
+      <div class="train-row ${rowCls} ${dirCls}">
         <div class="col-time">${t.time}</div>
         <div class="col-dest">
           <div class="dest-name">${t.dest || '—'}</div>
           <div class="dest-train">${t.code}</div>
+          ${dirTag}
         </div>
         <div class="col-status ${stCls}">${stTxt}</div>
         <div class="col-countdown">
