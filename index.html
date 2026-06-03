@@ -206,12 +206,14 @@
 
   /* Northbound — visually secondary */
   .train-row.northbound {
-    opacity: 0.45;
+    opacity: 0.3;
     padding: 9px 14px;
+    transform: scale(0.97);
+    transform-origin: left center;
   }
-  .train-row.northbound .col-time   { font-size: 1.2rem; }
-  .train-row.northbound .dest-name  { font-size: 1.1rem; }
-  .train-row.northbound .due-num    { font-size: 1.1rem; }
+  .train-row.northbound .col-time   { font-size: 1.15rem; }
+  .train-row.northbound .dest-name  { font-size: 1.05rem; }
+  .train-row.northbound .due-num    { font-size: 1.05rem; }
 
   .dir-tag {
     display: inline-block;
@@ -224,6 +226,24 @@
     border-radius: 3px;
     padding: 1px 5px;
     margin-top: 3px;
+  }
+
+  .dir-divider {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 4px;
+    font-size: 0.62rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--dim);
+    opacity: 0.5;
+  }
+  .dir-divider::before, .dir-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
   }
 
   footer {
@@ -420,7 +440,28 @@ function render(trains) {
     el.innerHTML = `<div class="error-msg">No upcoming departures in next 2 hours</div>`;
     return;
   }
-  el.innerHTML = trains.map(t => {
+
+  // Sort: southbound first, then northbound — within each group by due time
+  const south = trains.filter(t => !t.north);
+  const north = trains.filter(t => t.north);
+
+  const rows = [];
+
+  // Up to 3 southbound rows
+  south.slice(0, 3).forEach(t => rows.push(renderRow(t)));
+
+  // Divider if there are northbound trains to show
+  if (north.length && south.length) {
+    rows.push(`<div class="dir-divider">↑ Northbound</div>`);
+  }
+
+  // Up to 2 northbound rows
+  north.slice(0, 2).forEach(t => rows.push(renderRow(t)));
+
+  el.innerHTML = rows.join('');
+}
+
+function renderRow(t) {
     const cancelled = t.status === 'Cancelled';
     const delayed   = !cancelled && t.late > 2;
     const rowCls    = cancelled ? 'cancelled' : delayed ? 'delayed' : 'on-time';
@@ -446,7 +487,6 @@ function render(trains) {
           <div class="due-label">${dueUnit}</div>
         </div>
       </div>`;
-  }).join('');
 }
 
 async function refresh() {
