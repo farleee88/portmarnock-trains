@@ -358,11 +358,11 @@ const PROXIES = [
   u => `https://thingproxy.freeboard.io/fetch/${u}`,
 ];
 
-// Today's date in Irish Rail format: DD MMM YYYY
+// Today's date in Irish Rail API format: D mon YYYY e.g. "3 jun 2026"
 function todayStr() {
   const d = new Date();
-  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  return `${String(d.getDate()).padStart(2,'0')} ${months[d.getMonth()]} ${d.getFullYear()}`;
+  const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+  return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
 }
 
 // Clock
@@ -401,14 +401,17 @@ async function stopsAtPortmarnock(trainCode) {
     const xml = await fetchViaProxy(MOVEMENTS_API(trainCode));
     const doc = new DOMParser().parseFromString(xml, 'text/xml');
     const stops = doc.querySelectorAll('objTrainMovements');
+    if (!stops.length) return false; // Empty response = bad date format or unknown train
     for (const stop of stops) {
-      const loc = stop.querySelector('LocationFullName')?.textContent?.trim() ?? '';
-      if (loc.toLowerCase().includes('portmarnock')) return true;
+      const loc  = stop.querySelector('LocationFullName')?.textContent?.trim() ?? '';
+      const type = stop.querySelector('LocationType')?.textContent?.trim() ?? '';
+      // Only count actual stops (S), origins (O), destinations (D) — not timing points (T)
+      if (type !== 'T' && loc.toLowerCase().includes('portmarnock')) return true;
     }
     return false;
   } catch {
-    // If we can't check, include it rather than hiding it
-    return true;
+    // Proxy failed — exclude rather than show unverified train
+    return false;
   }
 }
 
