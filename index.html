@@ -360,20 +360,12 @@
 </footer>
 
 <script>
-const API = 'https://api.irishrail.ie/realtime/realtime.asmx/getStationDataByNameXML?StationDesc=Portmarnock';
-
-// Tried in order. Direct first — Irish Rail now serves HTTPS, so if they
-// allow cross-origin requests this works with no middleman at all.
-const ROUTES = [
-  u => u,
-  u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
-  u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-  u => `https://api.cors.lol/?url=${encodeURIComponent(u)}`,
-  u => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
-];
-
-// Remember which route worked so later refreshes skip the dead ones
-let goodRoute = null;
+// Our own Cloudflare Worker — no third-party proxies, no rate limits.
+// Source: github.com/farleee88/irishrail-worker
+const WORKER = 'https://irishrail-worker.r-farrelly.workers.dev/?url=';
+const API = WORKER + encodeURIComponent(
+  'https://api.irishrail.ie/realtime/realtime.asmx/getStationDataByCodeXML_WithNumMins?StationCode=PMNCK&NumMins=90'
+);
 
 function tick() {
   const n = new Date();
@@ -383,27 +375,14 @@ function tick() {
 setInterval(tick, 1000);
 tick();
 
-async function tryRoute(make, url) {
-  const r = await fetch(make(url), { signal: AbortSignal.timeout(8000) });
-  if (!r.ok) throw new Error('bad status');
-  const t = await r.text();
-  if (!t.includes('ArrayOf') && !t.includes('objStationData')) throw new Error('bad body');
-  return t;
-}
-
 async function fetchData() {
-  // Stick with whatever worked last time
-  if (goodRoute) {
-    try { return await tryRoute(goodRoute, API); } catch { goodRoute = null; }
+  const r = await fetch(API, { signal: AbortSignal.timeout(15000) });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const t = await r.text();
+  if (!t.includes('ArrayOf') && !t.includes('objStationData')) {
+    throw new Error('unexpected response');
   }
-  for (const make of ROUTES) {
-    try {
-      const t = await tryRoute(make, API);
-      goodRoute = make;
-      return t;
-    } catch {}
-  }
-  throw new Error('All routes failed');
+  return t;
 }
 
 // Convert "HH:MM" string to today's Date object

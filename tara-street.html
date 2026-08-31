@@ -360,31 +360,17 @@
 </footer>
 
 <script>
-// NumMins=60 keeps the response small — Tara Street is busy, and the full
-// 90-minute payload was too slow to get through a free proxy in time.
-const STATION_API  = 'https://api.irishrail.ie/realtime/realtime.asmx/getStationDataByCodeXML_WithNumMins?StationCode=TARA&NumMins=60';
-const MOVEMENTS_API = code => `https://api.irishrail.ie/realtime/realtime.asmx/getTrainMovementsXML?TrainId=${code}&TrainDate=${todayStr()}`;
+// Our own Cloudflare Worker — no third-party proxies, no rate limits.
+// Source: github.com/farleee88/irishrail-worker
+const WORKER = 'https://irishrail-worker.r-farrelly.workers.dev/?url=';
+const via = u => WORKER + encodeURIComponent(u);
 
-// Direct first (free if it works), then the proxies that are still alive.
-// cors.lol and corsproxy.io removed — dead and paywalled respectively.
-const ROUTES = [
-  u => u,
-  u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-  u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
-];
+// Two boards, two requests. A train code appearing on both stations'
+// boards stops at both — no need to look up each train individually.
+const TARA_API = via('https://api.irishrail.ie/realtime/realtime.asmx/getStationDataByCodeXML_WithNumMins?StationCode=TARA&NumMins=60');
+const PMNK_API = via('https://api.irishrail.ie/realtime/realtime.asmx/getStationDataByCodeXML_WithNumMins?StationCode=PMNCK&NumMins=90');
 
-// These proxies are slow with larger payloads — 8s was cutting them off
-const TIMEOUT_MS = 20000;
-
-// Remember which route worked so later calls skip the dead ones
-let goodRoute = null;
-
-// Today's date in Irish Rail API format: D mon YYYY e.g. "3 jun 2026"
-function todayStr() {
-  const d = new Date();
-  const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
-  return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
-}
+const TIMEOUT_MS = 15000;
 
 // Clock
 function tick() {
@@ -396,33 +382,21 @@ setInterval(tick, 1000);
 tick();
 
 // Fetch with proxy fallback
-async function tryRoute(make, url) {
-  const r = await fetch(make(url), { signal: AbortSignal.timeout(TIMEOUT_MS) });
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  const t = await r.text();
-  if (!t.includes('<') || t.length < 50) throw new Error('empty response');
-  return t;
-}
-
-// Records why each route failed, for the on-screen diagnostic
+// Records the failure reason for the on-screen diagnostic
 let lastErrors = [];
 
 async function fetchViaProxy(url) {
-  // Stick with whatever worked last time
-  if (goodRoute) {
-    try { return await tryRoute(goodRoute, url); } catch { goodRoute = null; }
-  }
   lastErrors = [];
-  for (let i = 0; i < ROUTES.length; i++) {
-    try {
-      const t = await tryRoute(ROUTES[i], url);
-      goodRoute = ROUTES[i];
-      return t;
-    } catch (e) {
-      lastErrors.push(`${i === 0 ? 'direct' : 'proxy' + i}: ${e.message}`);
-    }
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const t = await r.text();
+    if (!t.includes('<') || t.length < 50) throw new Error('empty response');
+    return t;
+  } catch (e) {
+    lastErrors.push('worker: ' + e.message);
+    throw e;
   }
-  throw new Error('All routes failed');
 }
 
 // Convert "HH:MM" to today's Date
@@ -433,50 +407,17 @@ function timeToDate(hhmm) {
   return d;
 }
 
-// A train's stopping pattern doesn't change, so look it up once per session
-const stopsCache = new Map();
-
-// Check if a train stops at Portmarnock AFTER Tara Street
-async function stopsAtPortmarnock(trainCode) {
-  if (stopsCache.has(trainCode)) return stopsCache.get(trainCode);
-  try {
-    const xml = await fetchViaProxy(MOVEMENTS_API(trainCode));
-    const doc = new DOMParser().parseFromString(xml, 'text/xml');
-    const stops = Array.from(doc.querySelectorAll('objTrainMovements'));
-    if (!stops.length) return false;
-
-    // Find Tara Street's position in the journey
-    let taraOrder = -1;
-    for (const stop of stops) {
-      const loc  = stop.querySelector('LocationFullName')?.textContent?.trim().toLowerCase() ?? '';
-      const type = stop.querySelector('LocationType')?.textContent?.trim() ?? '';
-      const order = parseInt(stop.querySelector('LocationOrder')?.textContent?.trim() ?? '0', 10);
-      if (type !== 'T' && loc.includes('tara street')) {
-        taraOrder = order;
-        break;
-      }
-    }
-
-    // If we can't find Tara Street in the stops, exclude
-    if (taraOrder === -1) { stopsCache.set(trainCode, false); return false; }
-
-    // Now check if Portmarnock appears AFTER Tara Street
-    for (const stop of stops) {
-      const loc   = stop.querySelector('LocationFullName')?.textContent?.trim().toLowerCase() ?? '';
-      const type  = stop.querySelector('LocationType')?.textContent?.trim() ?? '';
-      const order = parseInt(stop.querySelector('LocationOrder')?.textContent?.trim() ?? '0', 10);
-      if (type !== 'T' && order > taraOrder && loc.includes('portmarnock')) {
-        stopsCache.set(trainCode, true);
-        return true;
-      }
-    }
-
-    stopsCache.set(trainCode, false);
-    return false;
-  } catch {
-    // Network failure — don't cache, so it retries next refresh
-    return false;
-  }
+// Build a map of train code -> minutes until it reaches Portmarnock
+function parsePortmarnockCodes(xml) {
+  const doc = new DOMParser().parseFromString(xml, 'text/xml');
+  const map = new Map();
+  doc.querySelectorAll('objStationData').forEach(n => {
+    const g = tag => n.querySelector(tag)?.textContent?.trim() ?? '';
+    const code = g('Traincode');
+    const due  = parseInt(g('Duein') || '', 10);
+    if (code && !Number.isNaN(due)) map.set(code, due);
+  });
+  return map;
 }
 
 // Parse station departures XML
@@ -512,6 +453,7 @@ function parseDepartures(xml) {
       late,
       status: g('Status'),
       due:    Math.max(0, due),
+      apiDue: parseInt(g('Duein') || '0', 10),
     });
   });
 
@@ -559,33 +501,29 @@ async function refresh() {
   refreshing = true;
   const el = document.getElementById('trains');
   try {
-    const xml = await fetchViaProxy(STATION_API);
-    const allTrains = parseDepartures(xml);
+    // Two sequential requests — gentle on the proxy's rate limit
+    const taraXml = await fetchViaProxy(TARA_API);
+    const allTrains = parseDepartures(taraXml);
 
     if (!allTrains.length) {
-      el.innerHTML = `<div class="error-msg">No northbound departures in next 2 hours</div>`;
+      el.innerHTML = `<div class="error-msg">No northbound departures in the next hour</div>`;
       document.getElementById('last-updated').textContent =
         `Updated ${new Date().toLocaleTimeString('en-IE', { hour12: false })}`;
       return;
     }
 
-    // Check stops in small batches rather than all at once — a dozen
-    // simultaneous requests through a free proxy invites rate-limiting
-    const checks = [];
-    for (let i = 0; i < allTrains.length; i += 3) {
-      const batch = allTrains.slice(i, i + 3);
-      const done = await Promise.all(
-        batch.map(t => stopsAtPortmarnock(t.code).then(stops => ({ ...t, stops })))
-      );
-      checks.push(...done);
-    }
+    const pmkXml = await fetchViaProxy(PMNK_API);
+    const pmkDue = parsePortmarnockCodes(pmkXml);
 
-    const filtered = checks.filter(t => t.stops);
+    // A train serves both stations if its code is on both boards, and it
+    // reaches Portmarnock later than it leaves Tara Street (which rules out
+    // services that already passed Portmarnock on their way into town).
+    const filtered = allTrains.filter(t => {
+      const p = pmkDue.get(t.code);
+      return p !== undefined && p > t.apiDue;
+    });
 
     if (!filtered.length) {
-      // Reached the API fine, but every stop-check came back negative.
-      // Usually means the movements lookups are failing, not that no
-      // train stops at Portmarnock — so show them rather than a blank board.
       el.innerHTML =
         `<div class="error-msg">Stop check unavailable — showing all northbound</div>`
         + allTrains.slice(0, 5).map(renderRow).join('');
