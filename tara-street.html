@@ -349,9 +349,8 @@
 </footer>
 
 <script>
-// NB: raw space, not %20 — encoding it here would get double-encoded
-// (%20 -> %2520) when the URL is passed through a proxy.
-const STATION_API  = 'https://api.irishrail.ie/realtime/realtime.asmx/getStationDataByNameXML?StationDesc=Tara Street';
+// Station code avoids any space/encoding issues in the URL
+const STATION_API  = 'https://api.irishrail.ie/realtime/realtime.asmx/getStationDataByCodeXML?StationCode=TARA';
 const MOVEMENTS_API = code => `https://api.irishrail.ie/realtime/realtime.asmx/getTrainMovementsXML?TrainId=${code}&TrainDate=${todayStr()}`;
 
 // Tried in order. Direct first — Irish Rail now serves HTTPS, so if they
@@ -386,23 +385,29 @@ tick();
 // Fetch with proxy fallback
 async function tryRoute(make, url) {
   const r = await fetch(make(url), { signal: AbortSignal.timeout(8000) });
-  if (!r.ok) throw new Error('bad status');
+  if (!r.ok) throw new Error('HTTP ' + r.status);
   const t = await r.text();
-  if (!t.includes('<') || t.length < 50) throw new Error('bad body');
+  if (!t.includes('<') || t.length < 50) throw new Error('empty response');
   return t;
 }
+
+// Records why each route failed, for the on-screen diagnostic
+let lastErrors = [];
 
 async function fetchViaProxy(url) {
   // Stick with whatever worked last time
   if (goodRoute) {
     try { return await tryRoute(goodRoute, url); } catch { goodRoute = null; }
   }
-  for (const make of ROUTES) {
+  lastErrors = [];
+  for (let i = 0; i < ROUTES.length; i++) {
     try {
-      const t = await tryRoute(make, url);
-      goodRoute = make;
+      const t = await tryRoute(ROUTES[i], url);
+      goodRoute = ROUTES[i];
       return t;
-    } catch {}
+    } catch (e) {
+      lastErrors.push(`${i === 0 ? 'direct' : 'proxy' + i}: ${e.message}`);
+    }
   }
   throw new Error('All routes failed');
 }
@@ -533,9 +538,17 @@ function render(trains) {
 }
 
 async function refresh() {
+  const el = document.getElementById('trains');
   try {
     const xml = await fetchViaProxy(STATION_API);
     const allTrains = parseDepartures(xml);
+
+    if (!allTrains.length) {
+      el.innerHTML = `<div class="error-msg">No northbound departures in next 2 hours</div>`;
+      document.getElementById('last-updated').textContent =
+        `Updated ${new Date().toLocaleTimeString('en-IE', { hour12: false })}`;
+      return;
+    }
 
     // Check stops in small batches rather than all at once — a dozen
     // simultaneous requests through a free proxy invites rate-limiting
@@ -549,15 +562,24 @@ async function refresh() {
     }
 
     const filtered = checks.filter(t => t.stops);
-    render(filtered);
+
+    if (!filtered.length) {
+      // Reached the API fine, but every stop-check came back negative.
+      // Usually means the movements lookups are failing, not that no
+      // train stops at Portmarnock — so show them rather than a blank board.
+      el.innerHTML =
+        `<div class="error-msg">Stop check unavailable — showing all northbound</div>`
+        + allTrains.slice(0, 5).map(renderRow).join('');
+    } else {
+      render(filtered);
+    }
 
     document.getElementById('last-updated').textContent =
       `Updated ${new Date().toLocaleTimeString('en-IE', { hour12: false })}`;
-  } catch {
-    if (document.querySelector('.loading')) {
-      document.getElementById('trains').innerHTML =
-        `<div class="error-msg">⚠ Could not reach Irish Rail</div>`;
-    }
+  } catch (e) {
+    el.innerHTML =
+      `<div class="error-msg">⚠ Could not reach Irish Rail</div>`
+      + `<div class="diag">${lastErrors.join(' · ') || e.message}</div>`;
     document.getElementById('last-updated').textContent = 'Retrying…';
   }
 }
