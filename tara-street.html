@@ -295,6 +295,17 @@
     letter-spacing: 0.1em;
   }
 
+  .diag {
+    text-align: center;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.6rem;
+    color: var(--dim);
+    padding: 0 12px;
+    margin-top: -8px;
+    line-height: 1.5;
+    word-break: break-word;
+  }
+
   .loading-bar { width: 140px; height: 2px; background: var(--border); border-radius: 2px; overflow: hidden; }
   .loading-bar::after {
     content: '';
@@ -349,19 +360,21 @@
 </footer>
 
 <script>
-// Station code avoids any space/encoding issues in the URL
-const STATION_API  = 'https://api.irishrail.ie/realtime/realtime.asmx/getStationDataByCodeXML?StationCode=TARA';
+// NumMins=60 keeps the response small — Tara Street is busy, and the full
+// 90-minute payload was too slow to get through a free proxy in time.
+const STATION_API  = 'https://api.irishrail.ie/realtime/realtime.asmx/getStationDataByCodeXML_WithNumMins?StationCode=TARA&NumMins=60';
 const MOVEMENTS_API = code => `https://api.irishrail.ie/realtime/realtime.asmx/getTrainMovementsXML?TrainId=${code}&TrainDate=${todayStr()}`;
 
-// Tried in order. Direct first — Irish Rail now serves HTTPS, so if they
-// allow cross-origin requests this works with no middleman at all.
+// Direct first (free if it works), then the proxies that are still alive.
+// cors.lol and corsproxy.io removed — dead and paywalled respectively.
 const ROUTES = [
   u => u,
-  u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
   u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-  u => `https://api.cors.lol/?url=${encodeURIComponent(u)}`,
-  u => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
+  u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
 ];
+
+// These proxies are slow with larger payloads — 8s was cutting them off
+const TIMEOUT_MS = 20000;
 
 // Remember which route worked so later calls skip the dead ones
 let goodRoute = null;
@@ -384,7 +397,7 @@ tick();
 
 // Fetch with proxy fallback
 async function tryRoute(make, url) {
-  const r = await fetch(make(url), { signal: AbortSignal.timeout(8000) });
+  const r = await fetch(make(url), { signal: AbortSignal.timeout(TIMEOUT_MS) });
   if (!r.ok) throw new Error('HTTP ' + r.status);
   const t = await r.text();
   if (!t.includes('<') || t.length < 50) throw new Error('empty response');
@@ -537,7 +550,11 @@ function render(trains) {
   }).join('');
 }
 
+let refreshing = false;
+
 async function refresh() {
+  if (refreshing) return;   // a slow load is still in flight
+  refreshing = true;
   const el = document.getElementById('trains');
   try {
     const xml = await fetchViaProxy(STATION_API);
