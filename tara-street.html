@@ -349,14 +349,21 @@
 </footer>
 
 <script>
-const STATION_API  = 'http://api.irishrail.ie/realtime/realtime.asmx/getStationDataByNameXML?StationDesc=Tara%20Street';
-const MOVEMENTS_API = code => `http://api.irishrail.ie/realtime/realtime.asmx/getTrainMovementsXML?TrainId=${code}&TrainDate=${todayStr()}`;
+const STATION_API  = 'https://api.irishrail.ie/realtime/realtime.asmx/getStationDataByNameXML?StationDesc=Tara%20Street';
+const MOVEMENTS_API = code => `https://api.irishrail.ie/realtime/realtime.asmx/getTrainMovementsXML?TrainId=${code}&TrainDate=${todayStr()}`;
 
-const PROXIES = [
-  u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+// Tried in order. Direct first — Irish Rail now serves HTTPS, so if they
+// allow cross-origin requests this works with no middleman at all.
+const ROUTES = [
+  u => u,
+  u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
   u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-  u => `https://thingproxy.freeboard.io/fetch/${u}`,
+  u => `https://api.cors.lol/?url=${encodeURIComponent(u)}`,
+  u => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
 ];
+
+// Remember which route worked so later calls skip the dead ones
+let goodRoute = null;
 
 // Today's date in Irish Rail API format: D mon YYYY e.g. "3 jun 2026"
 function todayStr() {
@@ -375,16 +382,27 @@ setInterval(tick, 1000);
 tick();
 
 // Fetch with proxy fallback
+async function tryRoute(make, url) {
+  const r = await fetch(make(url), { signal: AbortSignal.timeout(8000) });
+  if (!r.ok) throw new Error('bad status');
+  const t = await r.text();
+  if (!t.includes('<') || t.length < 50) throw new Error('bad body');
+  return t;
+}
+
 async function fetchViaProxy(url) {
-  for (const make of PROXIES) {
+  // Stick with whatever worked last time
+  if (goodRoute) {
+    try { return await tryRoute(goodRoute, url); } catch { goodRoute = null; }
+  }
+  for (const make of ROUTES) {
     try {
-      const r = await fetch(make(url), { signal: AbortSignal.timeout(7000) });
-      if (!r.ok) continue;
-      const t = await r.text();
-      if (t.includes('<') && t.length > 50) return t;
+      const t = await tryRoute(make, url);
+      goodRoute = make;
+      return t;
     } catch {}
   }
-  throw new Error('All proxies failed');
+  throw new Error('All routes failed');
 }
 
 // Convert "HH:MM" to today's Date
@@ -395,22 +413,39 @@ function timeToDate(hhmm) {
   return d;
 }
 
-// Check if a train stops at Portmarnock by fetching its movements
+// Check if a train stops at Portmarnock AFTER Tara Street
 async function stopsAtPortmarnock(trainCode) {
   try {
     const xml = await fetchViaProxy(MOVEMENTS_API(trainCode));
     const doc = new DOMParser().parseFromString(xml, 'text/xml');
-    const stops = doc.querySelectorAll('objTrainMovements');
-    if (!stops.length) return false; // Empty response = bad date format or unknown train
+    const stops = Array.from(doc.querySelectorAll('objTrainMovements'));
+    if (!stops.length) return false;
+
+    // Find Tara Street's position in the journey
+    let taraOrder = -1;
     for (const stop of stops) {
-      const loc  = stop.querySelector('LocationFullName')?.textContent?.trim() ?? '';
+      const loc  = stop.querySelector('LocationFullName')?.textContent?.trim().toLowerCase() ?? '';
       const type = stop.querySelector('LocationType')?.textContent?.trim() ?? '';
-      // Only count actual stops (S), origins (O), destinations (D) — not timing points (T)
-      if (type !== 'T' && loc.toLowerCase().includes('portmarnock')) return true;
+      const order = parseInt(stop.querySelector('LocationOrder')?.textContent?.trim() ?? '0', 10);
+      if (type !== 'T' && loc.includes('tara street')) {
+        taraOrder = order;
+        break;
+      }
     }
+
+    // If we can't find Tara Street in the stops, exclude
+    if (taraOrder === -1) return false;
+
+    // Now check if Portmarnock appears AFTER Tara Street
+    for (const stop of stops) {
+      const loc   = stop.querySelector('LocationFullName')?.textContent?.trim().toLowerCase() ?? '';
+      const type  = stop.querySelector('LocationType')?.textContent?.trim() ?? '';
+      const order = parseInt(stop.querySelector('LocationOrder')?.textContent?.trim() ?? '0', 10);
+      if (type !== 'T' && order > taraOrder && loc.includes('portmarnock')) return true;
+    }
+
     return false;
   } catch {
-    // Proxy failed — exclude rather than show unverified train
     return false;
   }
 }
