@@ -349,7 +349,9 @@
 </footer>
 
 <script>
-const STATION_API  = 'https://api.irishrail.ie/realtime/realtime.asmx/getStationDataByNameXML?StationDesc=Tara%20Street';
+// NB: raw space, not %20 — encoding it here would get double-encoded
+// (%20 -> %2520) when the URL is passed through a proxy.
+const STATION_API  = 'https://api.irishrail.ie/realtime/realtime.asmx/getStationDataByNameXML?StationDesc=Tara Street';
 const MOVEMENTS_API = code => `https://api.irishrail.ie/realtime/realtime.asmx/getTrainMovementsXML?TrainId=${code}&TrainDate=${todayStr()}`;
 
 // Tried in order. Direct first — Irish Rail now serves HTTPS, so if they
@@ -413,8 +415,12 @@ function timeToDate(hhmm) {
   return d;
 }
 
+// A train's stopping pattern doesn't change, so look it up once per session
+const stopsCache = new Map();
+
 // Check if a train stops at Portmarnock AFTER Tara Street
 async function stopsAtPortmarnock(trainCode) {
+  if (stopsCache.has(trainCode)) return stopsCache.get(trainCode);
   try {
     const xml = await fetchViaProxy(MOVEMENTS_API(trainCode));
     const doc = new DOMParser().parseFromString(xml, 'text/xml');
@@ -434,18 +440,23 @@ async function stopsAtPortmarnock(trainCode) {
     }
 
     // If we can't find Tara Street in the stops, exclude
-    if (taraOrder === -1) return false;
+    if (taraOrder === -1) { stopsCache.set(trainCode, false); return false; }
 
     // Now check if Portmarnock appears AFTER Tara Street
     for (const stop of stops) {
       const loc   = stop.querySelector('LocationFullName')?.textContent?.trim().toLowerCase() ?? '';
       const type  = stop.querySelector('LocationType')?.textContent?.trim() ?? '';
       const order = parseInt(stop.querySelector('LocationOrder')?.textContent?.trim() ?? '0', 10);
-      if (type !== 'T' && order > taraOrder && loc.includes('portmarnock')) return true;
+      if (type !== 'T' && order > taraOrder && loc.includes('portmarnock')) {
+        stopsCache.set(trainCode, true);
+        return true;
+      }
     }
 
+    stopsCache.set(trainCode, false);
     return false;
   } catch {
+    // Network failure — don't cache, so it retries next refresh
     return false;
   }
 }
@@ -526,10 +537,16 @@ async function refresh() {
     const xml = await fetchViaProxy(STATION_API);
     const allTrains = parseDepartures(xml);
 
-    // Check each train's stops in parallel — does it call at Portmarnock?
-    const checks = await Promise.all(
-      allTrains.map(t => stopsAtPortmarnock(t.code).then(stops => ({ ...t, stops })))
-    );
+    // Check stops in small batches rather than all at once — a dozen
+    // simultaneous requests through a free proxy invites rate-limiting
+    const checks = [];
+    for (let i = 0; i < allTrains.length; i += 3) {
+      const batch = allTrains.slice(i, i + 3);
+      const done = await Promise.all(
+        batch.map(t => stopsAtPortmarnock(t.code).then(stops => ({ ...t, stops })))
+      );
+      checks.push(...done);
+    }
 
     const filtered = checks.filter(t => t.stops);
     render(filtered);
