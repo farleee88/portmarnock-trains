@@ -518,36 +518,38 @@ function parseDepartures(xml) {
   return rows.sort((a, b) => a.due - b.due);
 }
 
+function renderRow(t) {
+  const cancelled = t.status === 'Cancelled';
+  const delayed   = !cancelled && t.late > 2;
+  const rowCls    = cancelled ? 'cancelled' : delayed ? 'delayed' : 'on-time';
+  const stCls     = cancelled ? 'status-cancelled' : delayed ? 'status-delayed' : 'status-ontime';
+  const stTxt     = cancelled ? 'Cancelled' : delayed ? `+${t.late} min` : 'On Time';
+  const dueCls    = t.due <= 3 ? 'urgent' : t.due <= 8 ? 'soon' : 'comfortable';
+  const dueNum    = t.due === 0 ? 'NOW' : `${t.due}`;
+  const dueUnit   = t.due === 0 ? '' : t.due === 1 ? 'min' : 'mins';
+
+  return `
+    <div class="train-row ${rowCls}">
+      <div class="col-time">${t.time}</div>
+      <div class="col-dest">
+        <div class="dest-name">${t.dest || '—'}</div>
+        <div class="dest-train">${t.code}</div>
+      </div>
+      <div class="col-status ${stCls}">${stTxt}</div>
+      <div class="col-countdown">
+        <div class="due-num ${dueCls}">${dueNum}</div>
+        <div class="due-label">${dueUnit}</div>
+      </div>
+    </div>`;
+}
+
 function render(trains) {
   const el = document.getElementById('trains');
   if (!trains.length) {
     el.innerHTML = `<div class="error-msg">No trains stopping at Portmarnock</div>`;
     return;
   }
-  el.innerHTML = trains.slice(0, 5).map(t => {
-    const cancelled = t.status === 'Cancelled';
-    const delayed   = !cancelled && t.late > 2;
-    const rowCls    = cancelled ? 'cancelled' : delayed ? 'delayed' : 'on-time';
-    const stCls     = cancelled ? 'status-cancelled' : delayed ? 'status-delayed' : 'status-ontime';
-    const stTxt     = cancelled ? 'Cancelled' : delayed ? `+${t.late} min` : 'On Time';
-    const dueCls    = t.due <= 3 ? 'urgent' : t.due <= 8 ? 'soon' : 'comfortable';
-    const dueNum    = t.due === 0 ? 'NOW' : `${t.due}`;
-    const dueUnit   = t.due === 0 ? '' : t.due === 1 ? 'min' : 'mins';
-
-    return `
-      <div class="train-row ${rowCls}">
-        <div class="col-time">${t.time}</div>
-        <div class="col-dest">
-          <div class="dest-name">${t.dest || '—'}</div>
-          <div class="dest-train">${t.code}</div>
-        </div>
-        <div class="col-status ${stCls}">${stTxt}</div>
-        <div class="col-countdown">
-          <div class="due-num ${dueCls}">${dueNum}</div>
-          <div class="due-label">${dueUnit}</div>
-        </div>
-      </div>`;
-  }).join('');
+  el.innerHTML = trains.slice(0, 5).map(renderRow).join('');
 }
 
 let refreshing = false;
@@ -598,11 +600,13 @@ async function refresh() {
       `<div class="error-msg">⚠ Could not reach Irish Rail</div>`
       + `<div class="diag">${lastErrors.join(' · ') || e.message}</div>`;
     document.getElementById('last-updated').textContent = 'Retrying…';
+  } finally {
+    refreshing = false;
   }
 }
 
 refresh();
-setInterval(refresh, 30000);
+setInterval(refresh, 45000);
 </script>
 </body>
 </html>
