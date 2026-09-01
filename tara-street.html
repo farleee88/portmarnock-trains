@@ -367,8 +367,11 @@ const via = u => WORKER + encodeURIComponent(u);
 
 // Two boards, two requests. A train code appearing on both stations'
 // boards stops at both — no need to look up each train individually.
-const TARA_API = via('https://api.irishrail.ie/realtime/realtime.asmx/getStationDataByCodeXML_WithNumMins?StationCode=TARA&NumMins=60');
-const PMNK_API = via('https://api.irishrail.ie/realtime/realtime.asmx/getStationDataByCodeXML_WithNumMins?StationCode=PMNCK&NumMins=90');
+// Windows are generous because the Worker has no rate limits and the
+// payloads are small. Tara looks 90 min ahead; Portmarnock needs a longer
+// window still, since a train takes ~25-30 min to get there from Tara.
+const TARA_API = via('https://api.irishrail.ie/realtime/realtime.asmx/getStationDataByCodeXML_WithNumMins?StationCode=TARA&NumMins=90');
+const PMNK_API = via('https://api.irishrail.ie/realtime/realtime.asmx/getStationDataByCodeXML_WithNumMins?StationCode=PMNCK&NumMins=130');
 
 const TIMEOUT_MS = 15000;
 
@@ -444,7 +447,7 @@ function parseDepartures(xml) {
     if ((now - expectedDepart) > 2 * 60 * 1000) return;
 
     const due = Math.round((expectedDepart - now) / 60000);
-    if (due > 120) return;
+    if (due > 150) return;
 
     rows.push({
       time:   schTime,
