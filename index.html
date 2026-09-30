@@ -385,6 +385,22 @@ async function fetchData() {
   return t;
 }
 
+// DARTs report Direction as "Northbound"/"Southbound", but Northern Commuter
+// trains report their terminus instead ("To Dundalk", "To Drogheda").
+// So fall back to checking whether the destination is north of Portmarnock.
+const NORTH_OF_PORTMARNOCK = [
+  'malahide', 'donabate', 'rush', 'skerries', 'balbriggan', 'gormanston',
+  'laytown', 'drogheda', 'dundalk', 'newry', 'portadown', 'belfast', 'mosney',
+];
+
+function isNorthbound(direction, destination) {
+  const d = (direction || '').toLowerCase();
+  if (d.includes('north')) return true;
+  if (d.includes('south')) return false;
+  const dest = (destination || '').toLowerCase();
+  return NORTH_OF_PORTMARNOCK.some(s => dest.includes(s));
+}
+
 // Convert "HH:MM" string to today's Date object
 function timeToDate(hhmm) {
   const [h, m] = hhmm.split(':').map(Number);
@@ -425,7 +441,7 @@ function parse(xml) {
       late,
       status: g('Status'),
       due: Math.max(0, due),
-      north: (g('Direction') || '').toLowerCase().includes('north'),
+      north: isNorthbound(g('Direction'), g('Destination')),
     });
   });
 
